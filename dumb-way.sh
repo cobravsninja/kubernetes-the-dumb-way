@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # nodes
-nodes[0]=debtest
-nodes[1]=debtest3
-nodes[2]=debtest4
+nodes[0]=master1
+nodes[1]=master2
+nodes[2]=master3
 
 # nodes IP
-nodes_ip[0]=192.168.156.100
-nodes_ip[1]=192.168.155.101
-nodes_ip[2]=192.168.152.101
+nodes_ip[0]=192.168.150.52
+nodes_ip[1]=192.168.151.52
+nodes_ip[2]=192.168.152.52
 
 # pod subnet & load balancer
-POD_SUBNET=10.17.0.0/16
-LB=10.40.40.1
+POD_SUBNET=10.250.0.0/16
+LB=10.41.41.1
 
 # etcd pki/bin dir
 ETCD_PKI=/etc/etcd/pki
@@ -21,8 +21,8 @@ ETCD_BIN=/usr/local/bin
 
 # docker, etcd, k8s versions
 DOCKER_VERSION=17.03
-K8S_VERSION=1.10.4
-ETCD_VERSION="v3.1.12"
+K8S_VERSION=1.11.1
+ETCD_VERSION="v3.2.17"
 CALICO_VERSION="v3.1"
 CALICOCTL_VERSION="v3.1.3"
 
@@ -102,7 +102,6 @@ EOF
 # k8s installation & init function
 k8s() {
     echo
-    echo "k8s installation on $1, press enter to continue"
     read -p "k8s installation on $1, press enter to continue"
     scp $1.yaml $2:/tmp
     # remove docker & k8s
@@ -145,7 +144,7 @@ for i in "${!nodes[@]}"; do
     ./cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=peer "${nodes[$i]}".json | ./cfssljson -bare "${nodes[$i]}"-peer
 
     # removing pki & data dir
-    ssh ${nodes_ip[$i]} "rm -rf $ETCD_PKI 2> /dev/null; mkdir -p $ETCD_PKI; rm -rf $ETCD_DIR 2> /dev/null"
+    ssh ${nodes_ip[$i]} "rm -rf $ETCD_PKI; mkdir -p $ETCD_PKI; rm -rf $ETCD_DIR; rm -rf /var/lib/kubelet; rm -rf /etc/kubernetes"
 
     # etcd systemd unit file
     cat > ${nodes[$i]}.service <<EOF
