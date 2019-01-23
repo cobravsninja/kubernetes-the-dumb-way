@@ -12,6 +12,8 @@ nodes_ip[2]=192.168.152.52
 
 # pod subnet & load balancer
 POD_SUBNET=10.250.0.0/16
+SERVICE_SUBNET=10.96.0.0/12
+DNS_DOMAIN=cluster.local
 LB=10.41.41.1
 
 # etcd pki/bin dir
@@ -20,11 +22,11 @@ ETCD_DIR=/var/lib/etcd
 ETCD_BIN=/usr/local/bin
 
 # docker, etcd, k8s versions
-DOCKER_VERSION=17.03
-K8S_VERSION=1.11.1
-ETCD_VERSION="v3.2.17"
-CALICO_VERSION="v3.1"
-CALICOCTL_VERSION="v3.1.3"
+DOCKER_VERSION=18.06.0
+K8S_VERSION=1.13.2
+ETCD_VERSION="v3.3.10"
+CALICO_VERSION="v3.4"
+CALICOCTL_VERSION="v3.4.0"
 
 # cfssl stuff
 curl -so cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 || { echo "Can't fetch cfssl"; exit; }
@@ -119,7 +121,7 @@ k8s() {
       CNI_VERSION=\$(apt-cache show kubelet=\$(apt-cache madison kubelet | fgrep $K8S_VERSION | head -1 | awk '{print \$3}') | egrep -o 'kubernetes-cni.+' | awk '{print \$3}' | cut -d ')' -f 1) && 
       apt-get install -y kubernetes-cni=\$(apt-cache madison kubernetes-cni | fgrep \$CNI_VERSION | head -1 | awk '{print \$3}') &&
       apt-get install -y \$(for i in kubelet kubeadm kubectl; do a=\`apt-cache madison \$i | fgrep $K8S_VERSION | head -1 | awk '{print \$3}'\`; echo -n \"\$i=\$a \"; done) && 
-      apt-mark hold kubeadm kubectl kubelet kubernetes-cni"
+      apt-mark hold kubeadm kubectl kubelet kubernetes-cni docker-ce"
     # copy pki stuff from 1st node to 2nd & 3rd nodes
     [ "$1" != "${nodes[0]}" ] && scp -rp pki $2:/etc/kubernetes
 
@@ -205,20 +207,26 @@ EOF
 
     # k8s installation
     cat > ${nodes[$i]}.yaml <<EOF
-apiVersion: kubeadm.k8s.io/v1alpha1
-kind: MasterConfiguration
-api:
+apiVersion: kubeadm.k8s.io/v1alpha3
+kind: InitConfiguration
+apiEndpoint:
   advertiseAddress: $LB
+---
+apiVersion: kubeadm.k8s.io/v1alpha3
+kind: ClusterConfiguration
 etcd:
-  endpoints:
-  - https://${nodes_ip[0]}:2379
-  - https://${nodes_ip[1]}:2379
-  - https://${nodes_ip[2]}:2379
-  caFile: $ETCD_PKI/ca.pem
-  certFile: $ETCD_PKI/client.pem
-  keyFile: $ETCD_PKI/client-key.pem
-  networking:
-    podSubnet: $POD_SUBNET
+  external:
+    endpoints:
+    - https://${nodes_ip[0]}:2379
+    - https://${nodes_ip[1]}:2379
+    - https://${nodes_ip[2]}:2379
+    caFile: $ETCD_PKI/ca.pem
+    certFile: $ETCD_PKI/client.pem
+    keyFile: $ETCD_PKI/client-key.pem
+networking:
+  serviceSubnet: $SERVICE_SUBNET
+  podSubnet: $POD_SUBNET
+  dnsDomain: $DNS_DOMAIN
 apiServerCertSANs:
 - "${nodes_ip[0]}"
 - "${nodes_ip[1]}"
@@ -248,7 +256,7 @@ export ETCD_CA_CERT_FILE=$ETCD_PKI/ca.pem
 curl -s https://docs.projectcalico.org/$CALICO_VERSION/getting-started/kubernetes/installation/hosted/calico.yaml -O
 
 # replace default etcd address
-sed -i 's#http://127.0.0.1:2379#https://${nodes_ip[0]}:2379,https://${nodes_ip[1]}:2379,https://${nodes_ip[2]}:2379#' calico.yaml
+sed -i 's#http://10.96.232.136:6666#https://${nodes_ip[0]}:2379,https://${nodes_ip[1]}:2379,https://${nodes_ip[2]}:2379#' calico.yaml
 # enable etcd_ca, etcd_cert, etcd_key TLS
 sed -ri 's/".+#//' calico.yaml
 # etcd client key
@@ -260,7 +268,6 @@ sed -ri "s/# (etcd-ca:) null/\1 \$(cat $ETCD_PKI/ca.pem | base64 -w 0)/" calico.
 # replaces default 192.168.0.0/16 subnet
 sed -i 's#192.168.0.0/16#$POD_SUBNET#' calico.yaml
 # install calico
-kubectl apply -f https://docs.projectcalico.org/$CALICO_VERSION/getting-started/kubernetes/installation/rbac.yaml
 kubectl apply -f calico.yaml
 echo "Sleeping for a while"
 sleep 5
